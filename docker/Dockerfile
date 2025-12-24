@@ -26,14 +26,19 @@ RUN apk update && apk upgrade && \
         wget && \
     rm -rf /var/cache/apk/*
 
-# Install Python and Node dependencies
-# Add build tools temporarily for native modules, then remove them
+# Install Python dependencies
 COPY docker/requirements.txt docker/requirements.txt
+
+# Use source builds to avoid illegal instruction on ARM64
 RUN apk add --no-cache --virtual .build-deps \
         python3-dev \
-        build-base && \
-    npm install -g yarn && \
-    python -m pip install --no-cache-dir -r docker/requirements.txt && \
+        build-base \
+        libffi-dev \
+        openssl-dev \
+        musl-dev && \
+    python3 -m ensurepip && \
+    python3 -m pip install --upgrade pip setuptools wheel && \
+    python3 -m pip install --no-cache-dir --no-binary :all: -r docker/requirements.txt && \
     apk del .build-deps
 
 # Create beets directory structure
@@ -69,7 +74,7 @@ ENTRYPOINT ["sh", "/tidarr/docker/entrypoint.sh"]
 ## BUILD APP (production only)                                #
 ###############################################################
 
-FROM --platform=$BUILDPLATFORM ghcr.io/linuxserver/baseimage-alpine:3.21 AS app_builder
+FROM --platform=$TARGETPLATFORM ghcr.io/linuxserver/baseimage-alpine:3.21 AS app_builder
 
 WORKDIR /tidarr
 
@@ -116,7 +121,10 @@ COPY api/package.json ./api/package.json
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/v6,sharing=locked \
     apk add --no-cache --virtual .build-deps \
         python3-dev \
-        build-base && \
+        build-base \
+        libffi-dev \
+        openssl-dev \
+        musl-dev && \
     mkdir -p /shared/.processing && \
     yarn install --frozen-lockfile --production && \
     apk del .build-deps && \
