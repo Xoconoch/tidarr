@@ -22,6 +22,7 @@ RUN apk update && apk upgrade && \
         bash \
         su-exec \
         curl \
+        git \
         wget && \
     rm -rf /var/cache/apk/*
 
