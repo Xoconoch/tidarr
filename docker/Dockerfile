@@ -1,7 +1,3 @@
-###############################################################
-## ARGUMENTS FOR MULTI-ARCH SUPPORT                          #
-###############################################################
-
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 
@@ -27,19 +23,18 @@ RUN apk update && apk upgrade && \
         su-exec \
         curl \
         git \
-        wget \
-        libffi-dev \
-        openssl-dev \
-        musl-dev && \
+        wget && \
     rm -rf /var/cache/apk/*
 
-# Copy Python requirements
+# Install Python and Node dependencies
+# Add build tools temporarily for native modules, then remove them
 COPY docker/requirements.txt docker/requirements.txt
-
-# Install Python dependencies using prebuilt wheels when possible
-RUN python3 -m ensurepip && \
-    python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir -r docker/requirements.txt
+RUN apk add --no-cache --virtual .build-deps \
+        python3-dev \
+        build-base && \
+    npm install -g yarn && \
+    python -m pip install --no-cache-dir -r docker/requirements.txt && \
+    apk del .build-deps
 
 # Create beets directory structure
 RUN mkdir -p /shared/beets && \
@@ -60,10 +55,11 @@ ENV NODE_ENV="${NODE_ENV}" \
 RUN apk add --no-cache git && \
     npm install -g tsx
 
-# Expose dev ports
+# In dev mode, files are mounted via volume
+# No need to copy anything here
+
 EXPOSE 8484 3000
 
-# Healthcheck for development
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:8484/api/is-auth-active || exit 1
 
@@ -73,7 +69,7 @@ ENTRYPOINT ["sh", "/tidarr/docker/entrypoint.sh"]
 ## BUILD APP (production only)                                #
 ###############################################################
 
-FROM --platform=$TARGETPLATFORM ghcr.io/linuxserver/baseimage-alpine:3.21 AS app_builder
+FROM --platform=$BUILDPLATFORM ghcr.io/linuxserver/baseimage-alpine:3.21 AS app_builder
 
 WORKDIR /tidarr
 
@@ -86,10 +82,9 @@ RUN apk add --no-cache git npm nodejs && \
     npm install -g yarn && \
     rm -rf /var/cache/apk/*
 
-# Copy all files for build
 COPY . .
 
-# Install all workspace dependencies at once (Yarn caching)
+# Install all workspace dependencies at once
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/v6,sharing=locked \
     yarn install --prefer-offline --frozen-lockfile
 
@@ -121,10 +116,7 @@ COPY api/package.json ./api/package.json
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/v6,sharing=locked \
     apk add --no-cache --virtual .build-deps \
         python3-dev \
-        build-base \
-        libffi-dev \
-        openssl-dev \
-        musl-dev && \
+        build-base && \
     mkdir -p /shared/.processing && \
     yarn install --frozen-lockfile --production && \
     apk del .build-deps && \
@@ -135,7 +127,6 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/v6,sharing=locked \
 
 EXPOSE 8484
 
-# Healthcheck for production
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8484/api/is-auth-active || exit 1
 
