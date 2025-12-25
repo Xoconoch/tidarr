@@ -1,3 +1,7 @@
+###############################################################
+## ARGUMENTS FOR MULTI-ARCH SUPPORT                          #
+###############################################################
+
 ARG BUILDPLATFORM
 ARG TARGETPLATFORM
 
@@ -23,23 +27,19 @@ RUN apk update && apk upgrade && \
         su-exec \
         curl \
         git \
-        wget && \
-    rm -rf /var/cache/apk/*
-
-# Install Python dependencies
-COPY docker/requirements.txt docker/requirements.txt
-
-# Use source builds to avoid illegal instruction on ARM64
-RUN apk add --no-cache --virtual .build-deps \
-        python3-dev \
-        build-base \
+        wget \
         libffi-dev \
         openssl-dev \
         musl-dev && \
-    python3 -m ensurepip && \
+    rm -rf /var/cache/apk/*
+
+# Copy Python requirements
+COPY docker/requirements.txt docker/requirements.txt
+
+# Install Python dependencies using prebuilt wheels when possible
+RUN python3 -m ensurepip && \
     python3 -m pip install --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir --no-binary :all: -r docker/requirements.txt && \
-    apk del .build-deps
+    python3 -m pip install --no-cache-dir -r docker/requirements.txt
 
 # Create beets directory structure
 RUN mkdir -p /shared/beets && \
@@ -60,11 +60,10 @@ ENV NODE_ENV="${NODE_ENV}" \
 RUN apk add --no-cache git && \
     npm install -g tsx
 
-# In dev mode, files are mounted via volume
-# No need to copy anything here
-
+# Expose dev ports
 EXPOSE 8484 3000
 
+# Healthcheck for development
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:8484/api/is-auth-active || exit 1
 
@@ -87,9 +86,10 @@ RUN apk add --no-cache git npm nodejs && \
     npm install -g yarn && \
     rm -rf /var/cache/apk/*
 
+# Copy all files for build
 COPY . .
 
-# Install all workspace dependencies at once
+# Install all workspace dependencies at once (Yarn caching)
 RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/v6,sharing=locked \
     yarn install --prefer-offline --frozen-lockfile
 
@@ -135,6 +135,7 @@ RUN --mount=type=cache,target=/usr/local/share/.cache/yarn/v6,sharing=locked \
 
 EXPOSE 8484
 
+# Healthcheck for production
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8484/api/is-auth-active || exit 1
 
